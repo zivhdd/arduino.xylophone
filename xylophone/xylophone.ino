@@ -121,10 +121,10 @@ public:
 };
 
 enum XYLState { READ_NOTE, HIT_DOWN, HIT_UP, POST_HIT };
-
+// 31 + 19
 class XYLPlayer {
 public:  
-  XYLPlayer() : base_hit(31), last_hit_time(0) {
+  XYLPlayer() : base_hit(48), last_hit_time(0) {
 
   }
   
@@ -213,7 +213,7 @@ public:
       last_hit_time = millis();
       //sp << last_hit_time << ": HIT !!!" << endl;
       set_state(HIT_UP, last_hit_time + 40);
-      hit_servo.write(base_hit + 19);
+      hit_servo.write(base_hit + 3);
       hit_count++;
       
     } else if (state == HIT_UP) {
@@ -236,7 +236,7 @@ public:
   void hit() {
     Serial.print(millis()); Serial.println(": Hit");
     last_hit_time = millis();
-    hit_servo.write(base_hit + 18); //21);
+    hit_servo.write(base_hit + 5); //21);
     delay(100);
     delay(100);
     hit_servo.write(base_hit);
@@ -272,12 +272,12 @@ public:
     switch (note) {
       case 'C': return 88;
       case 'D': return 79;
-      case 'E': return 70;
+      case 'E': return 71;
       case 'F': return 63;
-      case 'G': return 56;
+      case 'G': return 55;
       case 'A': return 48;
-      case 'B': return 41;    
-      case 'c': return 32;    
+      case 'B': return 42;    
+      case 'c': return 35;    
     
     }
     return -1;
@@ -286,7 +286,7 @@ public:
   int get_note_angle(char note) {
     int offset = get_note_offset(note);
     if (offset < 0) return -1;
-    return offset -9;
+    return offset -11;
   }
   
   Servo note_servo;
@@ -310,7 +310,7 @@ char MELODY_CAMPTOWN_RACES[] = {0x47, 0x9d, 0x47, 0x45, 0x47, 0x41, 0x9d, 0x47, 
 char MELODY_OLD_MCDONALD_HAD_A_FARM[] = {0x47, 0xa1, 0x47, 0x47, 0x44, 0x45, 0x45, 0x44, 0xc3, 0x42, 0xa1, 0x42, 0x41, 0x41, 0x47, 0xe4, 0x44, 0xa1, 0x47, 0x47, 0x47, 0x44, 0x45, 0x45, 0x44, 0xc3, 0x42, 0xa1, 0x42, 0x41, 0x41, 0x47, 0xe4, 0x44, 0x90, 0x44, 0x47, 0xa1, 0x47, 0x47, 0x44, 0x90, 0x44, 0x47, 0xa1, 0x47, 0x47, 0xc3, 0x47, 0x90, 0x47, 0x47, 0xa1, 0x47, 0x90, 0x47, 0x47, 0xa1, 0x47, 0x90, 0x47, 0x47, 0x47, 0x47, 0xa1, 0x47, 0x47, 0x47, 0x47, 0x44, 0x45, 0x45, 0x44, 0xc3, 0x42, 0xa1, 0x42, 0x41, 0x41, 0x47, 0x0};
 char* MELODY_ABC = "CDEFGABc";
 #define NUM_MELODIES 10
-char* MELODIES[NUM_MELODIES] = {MELODY_ABC, MELODY_LONDON_BRIDGE, MELODY_OH_SUSANNA, MELODY_WHEN_THE_SAINTS, MELODY_ROW_ROW_YOUR_BOAT, MELODY_JINGLE_BELLS, MELODY_TWINKLE_TWINKLE, MELODY_JOY_TO_THE_WORLD, MELODY_CAMPTOWN_RACES, MELODY_OLD_MCDONALD_HAD_A_FARM};
+char* MELODIES[NUM_MELODIES] = {MELODY_ABC, MELODY_LONDON_BRIDGE, MELODY_OH_SUSANNA, MELODY_TWINKLE_TWINKLE, MELODY_WHEN_THE_SAINTS, MELODY_ROW_ROW_YOUR_BOAT, MELODY_JINGLE_BELLS, MELODY_JOY_TO_THE_WORLD, MELODY_CAMPTOWN_RACES, MELODY_OLD_MCDONALD_HAD_A_FARM};
 
 char* melody = NULL;
 
@@ -346,9 +346,9 @@ public:
   
 private:  
   int normalize(int value) {
-    if (value < 100) {
+    if (value < 200) {
       return - 1;
-    } else if (value > 900) {
+    } else if (value > 800) {
       return 1;
     } else if (value > 350 && value < 650) {
       return 0;
@@ -402,7 +402,7 @@ void setup()
 { 
   
   Serial.begin(9600);
-  xyl.init(9,10);
+  xyl.init(9,11);
   next_melody(0);
   pause = true;
   //xyl.set_melody(melody);
@@ -420,6 +420,7 @@ void loop()
   if (xyl.is_done()) {
     next_melody(1);
     xyl.wait(2000);
+    pause = true;
     return;
     
   }
