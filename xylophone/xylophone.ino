@@ -1,4 +1,3 @@
-//#define __AVR_ATmega32U4__
 #include <Servo.h> 
 
 /**
@@ -131,7 +130,7 @@ enum XYLState { READ_NOTE, HIT_DOWN, HIT_UP, POST_HIT };
 // 31 + 19
 class XYLPlayer {
 public:  
-  XYLPlayer() : base_hit(48), last_hit_time(0) {
+  XYLPlayer() : base_hit(45), last_hit_time(0) {
 
   }
   
@@ -220,7 +219,7 @@ public:
       last_hit_time = millis();
       //sp << last_hit_time << ": HIT !!!" << endl;
       set_state(HIT_UP, last_hit_time + 40);
-      hit_servo.write(base_hit + 3);
+      hit_servo.write(base_hit + 5);
       hit_count++;
       
     } else if (state == HIT_UP) {
@@ -324,12 +323,15 @@ char* melody = NULL;
 const int JX_PIN = A0;
 const int JY_PIN = A1;
 
+enum ControlCommand { CC_NONE, CC_CHANNEL, CC_NEXT, CC_TOGGLE_PAUSE };
 
 class JControl {
 public:
-  JControl() : xpin(A5), ypin(A4), prev_xvalue(0), prev_yvalue(0), xdir(0), ydir(0), last_sample_time(0) {}
+  JControl() : xpin(A5), ypin(A4), prev_xvalue(0), prev_yvalue(0), 
+	       xdir(0), ydir(0), last_sample_time(0) {}
   
   void reeval() {
+    cc_value = CC_NONE;
     unsigned long now = millis();
     if (now < last_sample_time + 100) {
       xdir = 0;
@@ -344,11 +346,28 @@ public:
     if (xdir != 0 || ydir != 0) {
       sp << "JControl : " << xdir << " : " << ydir << endl;
     }
-    
+
+    if (ydir < 0) {
+      cc_value = CC_TOGGLE_PAUSE;
+    } else if (ydir > 0) {
+      cc_value = CC_CHANNEL;
+      cc_payload = 0;
+    } else if (xdir != 0) {
+      cc_value = CC_NEXT;
+      cc_payload = - xdir;
+    } 
   }
   
   int get_dir_x() { return xdir;}
   int get_dir_y() { return ydir;}
+
+  ControlCommand get_command() {
+    return cc_value;
+  }
+
+  long get_command_payload() {
+    return cc_payload;
+  }
   
   
 private:  
@@ -386,19 +405,95 @@ private:
   int xdir;
   int ydir;
   unsigned long last_sample_time;
+  ControlCommand cc_value;
+  long cc_payload;
+
     
 };
 
 
 
+class IRControl {
+public:
+  IRControl(int ir_pin) : irrecv(ir_pin), last_poll_time(0), 
+			  poll_interval(100), ir_value(0) {
+  }
+
+  void init() {
+    irrecv.enableIRIn(); // Start the receiver
+  }
+
+  void reeval() {
+    cc_value = CC_NONE;
+
+    unsigned long now = millis();
+    if (last_poll_time + poll_interval < now ) {
+        return;
+    }
+
+    last_poll_time = now;
+    if (!irrecv.decode(&results)) {
+      return;
+    }
+
+    irrecv.resume(); 
+    if (results.value != 0xFFFFFFFF) {
+      ir_value = results.value;
+      return;
+    }
+
+    if (ir_value == 0) {
+      return;
+    }
+
+    cc_payload = 0;
+    switch (ir_value) {
+    case 0xFF6897: cc_value = CC_CHANNEL; cc_payload = 0; break;
+    case 0xFF30CF: cc_value = CC_CHANNEL; cc_payload = 1; break;
+    case 0xFF18E7: cc_value = CC_CHANNEL; cc_payload = 2; break;
+    case 0xFF7A85: cc_value = CC_CHANNEL; cc_payload = 3; break;
+    case 0xFF10EF: cc_value = CC_CHANNEL; cc_payload = 4; break;
+    case 0xFF38C7: cc_value = CC_CHANNEL; cc_payload = 5; break;
+    case 0xFF5AA5: cc_value = CC_CHANNEL; cc_payload = 6; break;
+    case 0xFF42BD: cc_value = CC_CHANNEL; cc_payload = 7; break;
+    case 0xFF4AB5: cc_value = CC_CHANNEL; cc_payload = 8; break;
+    case 0xFF52AD: cc_value = CC_CHANNEL; cc_payload = 9; break;
+    case 0xFF02FD: cc_value = CC_NEXT; cc_payload = -1; break;
+    case 0xFFC23D: cc_value = CC_NEXT; cc_payload = 1; break;
+    case 0xFF22DD: cc_value = CC_TOGGLE_PAUSE; break;
+    }
+
+    Serial.println(ir_value, HEX);
+    ir_value = 0;
+
+  }
+
+  ControlCommand get_command() {
+    return cc_value;
+  }
+
+  long get_command_payload() {
+    return cc_payload;
+  }
+  
+private:
+  IRrecv irrecv;
+  decode_results results;
+  unsigned long last_poll_time;
+  int poll_interval;
+  unsigned long ir_value;
+  ControlCommand cc_value;
+  long cc_payload;
+};
+
+const int IR_PIN = 3;
+
 XYLPlayer xyl;
 JControl jcontrol;
+IRControl ircontrol(IR_PIN);
 
-int IR_PIN = 3;
-IRrecv irrecv(IR_PIN);
-//IRdecode irdecoder;
-unsigned long last_ir_sample_time=0;
-decode_results results;
+
+
 
 int done = 0;
 int index = 0;
@@ -417,15 +512,48 @@ void setup()
   
   Serial.begin(9600);
   xyl.init(9,10);
+  ircontrol.init();
   next_melody(0);
   pause = true;
 
-  irrecv.enableIRIn(); // Start the receiver
+
   //xyl.set_melody(melody);
   //xyl.center();
   
 } 
  
+void apply_control(int command, long payload) {
+  sp << "CONTROL: command=" << command << "; payload=" <<  payload << endl;
+
+  switch (command) {
+  case CC_CHANNEL:
+    if (payload >= 0 and payload < NUM_MELODIES) {
+      index = payload ;
+      next_melody(0);    
+    }
+    break;
+  case CC_TOGGLE_PAUSE:
+    pause = !pause;
+    sp << "Mode: " << (pause ? "Pause" : "Play") << endl;
+    break;
+  case CC_NEXT:
+    {
+      int skip_dir = payload;
+      if (skip_dir < 0) {
+	unsigned long now = millis();
+	if (last_skip_prev_time + 1000 < now && xyl.get_hit_count() > 0) {
+	  skip_dir = 0;
+	}
+	last_skip_prev_time = now;
+      }
+      next_melody(skip_dir);
+      sp << (skip_dir < 0 ? "Prev" : (skip_dir == 0 ? "Restart" : "Next")) 
+	 << " mellody " << endl; 
+      xyl.wait(1000);
+    }
+    break;    
+  };
+}
 
 void loop() 
 { 
@@ -446,38 +574,14 @@ void loop()
   }
   
   jcontrol.reeval();
-  bool pause_press = (jcontrol.get_dir_y() < 0);
-  bool goto_head_press = (jcontrol.get_dir_y() > 0);
-  int skip_dir = -jcontrol.get_dir_x();
-  if (pause_press) {
-    pause = !pause;
-    sp << "Mode: " << (pause ? "Pause" : "Play") << endl;
-  } else if (goto_head_press) {
-    index = 0;
-    next_melody(0);
-  } else if (skip_dir != 0) {
-    if (skip_dir < 0) {
-      unsigned long now = millis();
-      if (last_skip_prev_time + 1000 < now && xyl.get_hit_count() > 0) {
-        skip_dir = 0;
-      }
-      last_skip_prev_time = now;
-    }
-    next_melody(skip_dir);
-    sp << (skip_dir < 0 ? "Prev" : (skip_dir == 0 ? "Restart" : "Next")) << " mellody " << endl; 
-    xyl.wait(1000);
+  if (jcontrol.get_command() != CC_NONE) {
+    apply_control(jcontrol.get_command(), jcontrol.get_command_payload());
+    return;
   }
 
-  if (last_ir_sample_time + 100 > millis() ) {
-    last_ir_sample_time = millis();
-    if (irrecv.decode(&results)) {
-      Serial.println(results.value, HEX);
-     irrecv.resume(); // Receive the next value
-      }
-   }
+  ircontrol.reeval();
+  if (ircontrol.get_command() != CC_NONE) {
+    apply_control(ircontrol.get_command(), ircontrol.get_command_payload());
+  }
   
-  
-  //delay(3000);
 }
-
-
