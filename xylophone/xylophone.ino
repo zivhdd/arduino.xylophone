@@ -22,7 +22,16 @@ SerialPrinter& operator<<(SerialPrinter& sp, T value) {
 
 //////////////////
 
+// TODO: these should be moved down (always as params)
+const int JX_PIN = A5;
+const int JY_PIN = A4;
+const int IR_PIN = 3;
+const int NOTE_SERVO_PIN = 9;
+const int HIT_SERVO_PIN = 10;
+const int BASE_HIT = 45;
+const int HIT_ANGLE = 5;
 
+//////////////////
 class MelodyTrack {
 public:
   MelodyTrack() : index(0), cur_time(0), next_time(0), base_duration(350) {}
@@ -65,59 +74,7 @@ public:
     note = pMelody[index];
     index +=1;
   }
-  
-  void next2() {
-    //unsigned long stime = millis();
-    if (pMelody == NULL) {
-      note = 0;
-      return;
-    }
-    unsigned long base_time = 0; //max(next_time, millis());
-    note = pMelody[index];
-    cur_time = next_time;
-    next_time = base_time + base_duration ;
-    if (note == 0) {
-      return;
-    }
-    while (true) {
-      index += 1;
-      char code = pMelody[index];
-      if (code == 0 || is_note(code)) {
-        break;
-      }
-      switch(code) {
-        case '-': 
-          next_time -= base_duration; break;
-        case ' ':
-          next_time += 200; break;
-        case 'z':
-          next_time += 100; break;
-        case '0':
-        case '1':
-        case '2':
-        case '3':
-        case '4':
-        case '5':
-        case '6':
-        case '7': 
-        case '8':
-        case '9':
-          next_time += (code - '0') * 10; break;        
-      }  
-    }
-    
-    //sp << base_time << ": Next time: " << next_time << "; Next note: " << note << endl;
-    //sp << "next-time: " << millis() - stime << endl;
-  }
-  
-  bool is_note(char ch) {
-    return ((ch >= 'A' && ch <= 'G') || (ch >= 'a' && ch <= 'c'));    
-  }
-  
-  bool is_numeric(char ch) {
-    return (ch >= '0' && ch <= '9');
-  }
-    
+        
   int index;
   char* pMelody;
   unsigned long cur_time; 
@@ -127,10 +84,10 @@ public:
 };
 
 enum XYLState { READ_NOTE, HIT_DOWN, HIT_UP, POST_HIT };
-// 31 + 19
+
 class XYLPlayer {
 public:  
-  XYLPlayer() : base_hit(45), last_hit_time(0) {
+  XYLPlayer() : base_hit(BASE_HIT), last_hit_time(0) {
 
   }
   
@@ -219,7 +176,7 @@ public:
       last_hit_time = millis();
       //sp << last_hit_time << ": HIT !!!" << endl;
       set_state(HIT_UP, last_hit_time + 40);
-      hit_servo.write(base_hit + 5);
+      hit_servo.write(base_hit + HIT_ANGLE);
       hit_count++;
       
     } else if (state == HIT_UP) {
@@ -320,14 +277,11 @@ char* MELODIES[NUM_MELODIES] = {MELODY_ABC, MELODY_LONDON_BRIDGE, MELODY_OH_SUSA
 
 char* melody = NULL;
 
-const int JX_PIN = A0;
-const int JY_PIN = A1;
-
 enum ControlCommand { CC_NONE, CC_CHANNEL, CC_NEXT, CC_TOGGLE_PAUSE };
 
 class JControl {
 public:
-  JControl() : xpin(A5), ypin(A4), prev_xvalue(0), prev_yvalue(0), 
+  JControl() : xpin(JX_PIN), ypin(JY_PIN), prev_xvalue(0), prev_yvalue(0), 
 	       xdir(0), ydir(0), last_sample_time(0) {}
   
   void reeval() {
@@ -486,7 +440,6 @@ private:
   long cc_payload;
 };
 
-const int IR_PIN = 3;
 
 XYLPlayer xyl;
 JControl jcontrol;
@@ -511,7 +464,7 @@ void setup()
 { 
   
   Serial.begin(9600);
-  xyl.init(9,10);
+  xyl.init(NOTE_SERVO_PIN, HIT_SERVO_PIN);
   ircontrol.init();
   next_melody(0);
   pause = true;
