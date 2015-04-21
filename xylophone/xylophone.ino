@@ -29,7 +29,7 @@ const int IR_PIN = 3;
 const int NOTE_SERVO_PIN = 9;
 const int HIT_SERVO_PIN = 10;
 const int BASE_HIT = 45;
-const int HIT_ANGLE = 5;
+const int HIT_ANGLE = 6;
 
 //////////////////
 class MelodyTrack {
@@ -249,7 +249,7 @@ public:
   int get_note_angle(char note) {
     int offset = get_note_offset(note);
     if (offset < 0) return -1;
-    return offset -11;
+    return offset -9;
   }
   
   Servo note_servo;
@@ -277,13 +277,13 @@ char* MELODY_ABC = "CDEFGABc";
 char* MELODIES[NUM_MELODIES] = {MELODY_ABC, MELODY_LONDON_BRIDGE, MELODY_OH_SUSANNA, MELODY_TWINKLE_TWINKLE, MELODY_WHEN_THE_SAINTS, MELODY_ROW_ROW_YOUR_BOAT, MELODY_JINGLE_BELLS, MELODY_JOY_TO_THE_WORLD, MELODY_CAMPTOWN_RACES, MELODY_OLD_MCDONALD_HAD_A_FARM};
 
 char* melody = NULL;
+char error_melody[5];
 
-
-
+enum RecordingCode { REC_NONE, REC_OK, REC_INTERRUPTED, REC_TOO_LONG, REC_MISSING };
 class RecordingDownloadManager { 
 
   public:
-  RecordingDownloadManager() : recording(false) {
+  RecordingDownloadManager() : recording(false), num_notes(0) {
     clear_recorded_melody();
   }
   
@@ -291,44 +291,75 @@ class RecordingDownloadManager {
     for (int idx=0; idx < sizeof(melody) ; ++ idx) {
       melody[idx] = 0;
     }
-    index = 0;    
+    index = 0;
+    num_notes = 0;
+    last_seqnum = 0;
+    last_msg_time = 0;
+    last_seqnum = 0;
   }
   
-  void start_recording() {
+  void start_recording(int notes) {
     clear_recorded_melody();
     recording = true;
     start_recording_time = millis();
+    last_msg_time = start_recording_time;
+    expected_num_notes = notes;
+    success_code = REC_OK;
     sp << "start recording" << endl;
   }
   
-  void check_recording() {
-    if (!recording) { return; }
-    unsigned long now = millis();
-    if (now - start_recording_time > 10000) {
-      sp << "recording too long (time)" << endl;
-      recording = false;
+  RecordingCode check_recording() {
+    if (success_code == REC_NONE) { return REC_NONE; }
+    check_errors();
+    RecordingCode rc = success_code;
+    if (!recording) {
+      success_code = REC_NONE;
+      return rc;
+    }
+    return REC_NONE;
+  }
+  
+  void check_errors() {    
+    if (recording) {
+      unsigned long now = millis();
+      if (now - start_recording_time > 30000 || now - last_msg_time > 5000) {
+        //sp << "long gap" << endl;        
+        recording = false;
+        success_code = REC_INTERRUPTED;
+        return;
+      } 
+    }
+    
+    if (!recording && success_code == REC_OK) {
+      if (num_notes !=   expected_num_notes) {
+        success_code = REC_MISSING;
+      }
     }
   }
   
-  void append_note(char note, int time) {
+  void append_note(char note, int time, int seqnum) {
 
     if (!recording) {
       return;
     }
+    last_msg_time = millis();
     if ((time >> 7) > 0) {
       melody[index++] = ((time >> 7) & 0x7f) | 0x80;
     }
     melody[index++] = (time & 0x7f) | 0x80;    
     melody[index++] = note;
+    num_notes++;
     if (index + 10 > sizeof(melody)) {
-      sp << "recording too long" << endl;
+      //sp << "recording too long" << endl;
       recording = false;
+      success_code = REC_TOO_LONG;
     }
   }
   
   void end_recording() {
     recording = false;
     sp << "end recording" << endl;
+    
   }
   
   bool is_recording() { return recording; }
@@ -338,7 +369,12 @@ class RecordingDownloadManager {
   char melody[100];
   bool recording;
   int index;
+  int num_notes;
+  int expected_num_notes;
   unsigned long start_recording_time;
+  unsigned long last_msg_time;
+  int last_seqnum;
+  RecordingCode success_code;
 };
 
 
@@ -361,16 +397,23 @@ struct NextCommand {
   int dir;  
 };
 
+struct RecordingStart {
+  CommandType ctype;
+  int num_notes;
+};
+
 struct RecordedNoteCommand {
   CommandType ctype;
   char note;
   int duration;
+  int seqnum;
 };
 
 union ControlCommand {
   BasicCommand basic;
   ChannelCommand channel;
   NextCommand next;
+  RecordingStart recording_start;
   RecordedNoteCommand recording;
 };
 
@@ -489,6 +532,7 @@ public:
     }
 
     irrecv.resume(); 
+    //sp << "## "; Serial.println(results.value, HEX);
     if ((results.value & 0xff0000l) == 0x880000l) {
       char note = 0;
       int note_idx = results.value & 0xf;
@@ -498,12 +542,14 @@ public:
       }
       command.basic.ctype = CC_RECORDED_NOTE;
       command.recording.note = "CDEFGABc"[note_idx - 1];
-      command.recording.duration = ((results.value & 0xfff0) >> 4);
+      command.recording.duration = ((results.value & 0x0ff0) >> 4);
+      command.recording.seqnum = ((results.value & 0xf000) >> 12);
       //Serial.println(results.value, HEX);
-      sp << "Read note " << command.recording.note << " " << command.recording.duration << endl;
+      sp << "Read note " << command.recording.note << " " << command.recording.duration << " seqnum=" << command.recording.seqnum << endl;
       return;      
-    } else if (results.value == 0x991111) {
+    } else if ((results.value & 0xffff00) == 0x991100) {
         command.basic.ctype = CC_RECORDING_START; 
+        command.recording_start.num_notes = results.value & 0xff;
         return;
     } else if (results.value == 0x992222) {
       command.basic.ctype = CC_RECORDING_END; return;
@@ -538,7 +584,7 @@ public:
     case 0xFF22DD: command.basic.ctype = CC_TOGGLE_PAUSE; break;
     }
 
-    Serial.println(ir_value, HEX);
+    sp << "## "; Serial.println(ir_value, HEX);
     ir_value = 0;
 
   }
@@ -625,10 +671,10 @@ void apply_control(const union ControlCommand& command) {
     }
     break;    
     case CC_RECORDING_START: 
-        recording_manager.start_recording();
+        recording_manager.start_recording(command.recording_start.num_notes);
         break;
     case CC_RECORDED_NOTE: 
-        recording_manager.append_note(command.recording.note, command.recording.duration);
+        recording_manager.append_note(command.recording.note, command.recording.duration, command.recording.seqnum);
         break;
     case CC_RECORDING_END: 
         recording_manager.end_recording();
@@ -646,6 +692,30 @@ void apply_control(const union ControlCommand& command) {
   
 }
 
+void check_recording() {
+   RecordingCode rc = recording_manager.check_recording();
+   if (rc == REC_NONE) return;
+    sp << "RecordingCode= " << rc << endl;
+
+   if (rc == REC_OK) {
+     xyl.set_melody(recording_manager.get_melody());
+     pause = false;
+     return;
+   }
+   
+   char errnote = 'G';
+   switch (rc) {
+     case REC_INTERRUPTED: errnote = 'G'; break;
+     case REC_MISSING : errnote = 'F'; break;
+     case REC_TOO_LONG: errnote = 'E'; break;     
+   }
+   error_melody[0] = errnote;
+   error_melody[1] = errnote;
+   error_melody[2] = errnote;
+   error_melody[3] = 0; 
+   xyl.set_melody(error_melody);
+   pause = false;
+}
 void loop() 
 { 
   //xyl.goto_angle(90);
@@ -664,7 +734,8 @@ void loop()
     xyl.reeval_play_melody();
   }
   
-  recording_manager.check_recording();
+  check_recording();
+
   jcontrol.reeval();
   if (jcontrol.get_command().basic.ctype != CC_NONE) {
     apply_control(jcontrol.get_command());
