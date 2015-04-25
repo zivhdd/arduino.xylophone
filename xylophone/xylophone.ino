@@ -28,9 +28,9 @@ const int JY_PIN = A4;
 const int IR_PIN = 3;
 const int NOTE_SERVO_PIN = 9;
 const int HIT_SERVO_PIN = 10;
-const int BASE_HIT = 48;
-const int HIT_ANGLE = 6;
-
+const int BASE_HIT = 45;
+const int HIT_ANGLE = 5;
+const int LED_PIN =4;
 //////////////////
 class MelodyTrack {
 public:
@@ -107,6 +107,10 @@ public:
   
   void wait(int delta) {
     last_hit_time += delta;
+  }
+  
+  void wait_abs(int delta) {
+    last_hit_time = millis() + delta;
   }
   
   bool is_done() { return mtrack.is_done(); }
@@ -252,7 +256,7 @@ public:
       case 'G': return 55;
       case 'A': return 48;
       case 'B': return 41;    
-      case 'c': return 35 ;    
+      case 'c': return 34 ;    
     
     }
     return -1;
@@ -261,7 +265,7 @@ public:
   int get_note_angle(char note) {
     int offset = get_note_offset(note);
     if (offset < 0) return -1;
-    return offset -14;
+    return offset -7;
   }
   
   Servo note_servo;
@@ -397,7 +401,7 @@ class RecordingDownloadManager {
 };
 
 
-enum CommandType { CC_NONE, CC_CHANNEL, CC_NEXT, CC_TOGGLE_PAUSE, CC_RECORDING_START, CC_RECORDING_END, CC_RECORDED_NOTE, CC_PLAY_RECORDING };
+enum CommandType { CC_NONE, CC_CHANNEL, CC_NEXT, CC_TOGGLE_PAUSE, CC_TOGGLE_CONTINUOUS, CC_RECORDING_START, CC_RECORDING_END, CC_RECORDED_NOTE, CC_PLAY_RECORDING };
 
 #pragma pack(push, 1)
 
@@ -443,7 +447,7 @@ union ControlCommand {
 class JControl {
 public:
   JControl() : xpin(JX_PIN), ypin(JY_PIN), prev_xvalue(0), prev_yvalue(0), 
-	       xdir(0), ydir(0), last_sample_time(0) {}
+	       xdir(0), ydir(0), last_sample_time(0), last_press_time(0) {}
   
   void reeval() {
     command.basic.ctype = CC_NONE;
@@ -464,7 +468,11 @@ public:
     }
 
     if (ydir < 0) {
-      command.basic.ctype = CC_TOGGLE_PAUSE;      
+      if (now - last_press_time < 2000) {
+        command.basic.ctype = CC_TOGGLE_PAUSE;
+      } else {
+        command.basic.ctype = CC_TOGGLE_CONTINUOUS;
+      }
     } else if (ydir > 0) {
       command.basic.ctype = CC_CHANNEL;
       command.channel.channel  = 0;
@@ -499,6 +507,20 @@ private:
   
   void update(int raw_value, int& prev, int& dir) {
     int value = normalize(raw_value);
+    dir = 0;
+    if (value == 2) return;
+    if (value == prev) return;
+    if (value != 0) {
+      last_press_time = millis();
+    } else {
+      dir = prev - value;
+    }      
+    prev = value;
+    
+  }
+
+  void update2(int raw_value, int& prev, int& dir) {
+    int value = normalize(raw_value);
     if (value == 2) return;
     if (value == 1 && value > prev) {
       dir = 1;
@@ -519,6 +541,7 @@ private:
   int xdir;
   int ydir;
   unsigned long last_sample_time;
+  long last_press_time;
  
   ControlCommand command;
 
@@ -633,6 +656,8 @@ IRControl ircontrol(IR_PIN);
 int done = 0;
 int index = 0;
 bool pause = false;
+bool continuous = false;
+int cached_continuous = 2;
 unsigned long last_skip_prev_time = 0;
 
 void next_melody(int dir) {
@@ -646,11 +671,12 @@ void setup()
 { 
   
   Serial.begin(9600);
+  pinMode(LED_PIN, OUTPUT);
   xyl.init(NOTE_SERVO_PIN, HIT_SERVO_PIN);
   ircontrol.init();
   next_melody(0);
   pause = true;
-
+  continuous = true;
 
   //xyl.set_melody(melody);
   //xyl.center();
@@ -669,10 +695,19 @@ void apply_control(const union ControlCommand& command) {
       next_melody(0);    
     }
     break;
+  case CC_TOGGLE_CONTINUOUS:
+    continuous = !continuous;
+    sp << "Continuous Mode: " << continuous << endl;
+    // when set continous, but in pause - fallthrough to toggle pause
+    if (!(continuous && pause)) {
+      break;
+    }
   case CC_TOGGLE_PAUSE:
     pause = !pause;
+    xyl.wait_abs(500);
     sp << "Mode: " << (pause ? "Pause" : "Play") << endl;
     break;
+    
   case CC_NEXT:
     {
       int skip_dir = command.next.dir;
@@ -686,7 +721,7 @@ void apply_control(const union ControlCommand& command) {
       next_melody(skip_dir);
       sp << (skip_dir < 0 ? "Prev" : (skip_dir == 0 ? "Restart" : "Next")) 
 	 << " mellody " << endl; 
-      xyl.wait(1000);
+      xyl.wait_abs(1000);
     }
     break;    
     case CC_RECORDING_START: 
@@ -744,7 +779,7 @@ void loop()
   if (xyl.is_done()) {
     next_melody(1);
     xyl.wait(2000);
-    pause = true;
+    pause = !continuous;
     return;
     
   }
@@ -766,5 +801,12 @@ void loop()
     apply_control(ircontrol.get_command());
   }
   
+  if (recording_manager.is_recording()) {
+    digitalWrite(LED_PIN, (millis() % 512 < 128) ? HIGH : LOW);
+    cached_continuous = 2;
+  } else if (cached_continuous != continuous) {
+    cached_continuous = continuous;
+    digitalWrite(LED_PIN, continuous ? HIGH : LOW);
+  }
   
 }
