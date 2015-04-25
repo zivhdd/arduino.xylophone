@@ -696,7 +696,7 @@ void apply_control(const union ControlCommand& command) {
     continuous = !continuous;
     sp << "Continuous Mode: " << continuous << endl;
     // when set continous, but in pause - fallthrough to toggle pause
-    if (!(continuous && pause)) {
+    if (true || !(continuous && pause)) {
       break;
     }
   case CC_TOGGLE_PAUSE:
