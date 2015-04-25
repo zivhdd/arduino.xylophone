@@ -620,6 +620,7 @@ public:
     case 0xFF02FD: command.basic.ctype = CC_NEXT; command.next.dir = -1; break;
     case 0xFFC23D: command.basic.ctype = CC_NEXT; command.next.dir = 1; break;
     case 0xFF22DD: command.basic.ctype = CC_TOGGLE_PAUSE; break;
+    case 0xFF9867: command.basic.ctype = CC_TOGGLE_CONTINUOUS; break;
     }
 
     sp << "## "; Serial.println(ir_value, HEX);
