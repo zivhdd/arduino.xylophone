@@ -28,7 +28,7 @@ const int JY_PIN = A4;
 const int IR_PIN = 3;
 const int NOTE_SERVO_PIN = 9;
 const int HIT_SERVO_PIN = 10;
-const int BASE_HIT = 45;
+const int BASE_HIT = 44;
 const int HIT_ANGLE = 5;
 const int LED_PIN =4;
 //////////////////
@@ -290,8 +290,8 @@ char MELODY_JINGLE_BELLS[] = {0x45, 0x9e, 0x45, 0x45, 0xbd, 0x45, 0x9e, 0x45, 0x
 char MELODY_JOY_TO_THE_WORLD[] = {0x63, 0xb1, 0x42, 0xa5, 0x41, 0x8c, 0x47, 0xca, 0x46, 0x98, 0x45, 0xb1, 0x44, 0x43, 0xca, 0x47, 0x98, 0x41, 0xca, 0x41, 0x98, 0x42, 0xca, 0x42, 0x98, 0x63, 0xca, 0x63, 0x98, 0x63, 0x42, 0x41, 0x47, 0x47, 0xa5, 0x46, 0x8c, 0x45, 0x98, 0x63, 0x63, 0x42, 0x41, 0x47, 0x47, 0xa5, 0x46, 0x8c, 0x45, 0x98, 0x45, 0x45, 0x45, 0x45, 0x45, 0x8c, 0x46, 0x47, 0xca, 0x46, 0x8c, 0x45, 0x44, 0x98, 0x44, 0x44, 0x44, 0x8c, 0x45, 0x46, 0xca, 0x45, 0x8c, 0x44, 0x43, 0x98, 0x63, 0xb1, 0x41, 0x98, 0x47, 0xa5, 0x46, 0x8c, 0x45, 0x98, 0x46, 0x45, 0xb1, 0x44, 0x43, 0x0};
 //char MELODY_OLD_MCDONALD_HAD_A_FARM[] = {0x47, 0xa1, 0x47, 0x47, 0x44, 0x45, 0x45, 0x44, 0xc3, 0x42, 0xa1, 0x42, 0x41, 0x41, 0x47, 0xe4, 0x44, 0xa1, 0x47, 0x47, 0x47, 0x44, 0x45, 0x45, 0x44, 0xc3, 0x42, 0xa1, 0x42, 0x41, 0x41, 0x47, 0xe4, 0x44, 0x90, 0x44, 0x47, 0xa1, 0x47, 0x47, 0x44, 0x90, 0x44, 0x47, 0xa1, 0x47, 0x47, 0xc3, 0x47, 0x90, 0x47, 0x47, 0xa1, 0x47, 0x90, 0x47, 0x47, 0xa1, 0x47, 0x90, 0x47, 0x47, 0x47, 0x47, 0xa1, 0x47, 0x47, 0x47, 0x47, 0x44, 0x45, 0x45, 0x44, 0xc3, 0x42, 0xa1, 0x42, 0x41, 0x41, 0x47, 0x0};
 
-
-char* MELODY_ABC = "CDEFGABc";
+char* ALL_NOTES = "CDEFGABc";
+char* MELODY_ABC = ALL_NOTES;
 #define NUM_MELODIES 9
 char* MELODIES[NUM_MELODIES] = {MELODY_ABC, MELODY_MUPPETS, MELODY_LONDON_BRIDGE, MELODY_OH_SUSANNA, MELODY_TWINKLE_TWINKLE, MELODY_WHEN_THE_SAINTS, MELODY_ROW_ROW_YOUR_BOAT, MELODY_JINGLE_BELLS, MELODY_JOY_TO_THE_WORLD};
 
@@ -324,7 +324,17 @@ class RecordingDownloadManager {
     last_msg_time = start_recording_time;
     expected_num_notes = notes;
     success_code = REC_OK;
-    sp << "start recording" << endl;
+    online = false;
+    sp << "start recording" << endl;    
+  }
+  
+  void toggle_online_recording() {
+    if (! recording) {
+      start_recording(0);
+      online = true;
+    } else {
+      end_recording();
+    }
   }
   
   RecordingCode check_recording() {
@@ -341,13 +351,16 @@ class RecordingDownloadManager {
   void check_errors() {    
     if (recording) {
       unsigned long now = millis();
-      if (now - start_recording_time > 30000 || now - last_msg_time > 5000) {
+      int threshold_factor = (online ? 2 : 1);
+      if (now - start_recording_time > 30000 * threshold_factor || now - last_msg_time > 5000 * threshold_factor) {
         //sp << "long gap" << endl;        
         recording = false;
         success_code = REC_INTERRUPTED;
         return;
       } 
     }
+    
+    if (online) { return; }
     
     if (!recording && success_code == REC_OK) {
       if (num_notes !=   expected_num_notes) {
@@ -361,7 +374,12 @@ class RecordingDownloadManager {
     if (!recording) {
       return;
     }
-    last_msg_time = millis();
+    long now = millis();
+    if (online && time == 0) {
+      time = min(max(now - last_msg_time, 200), 2000) / 25;
+    }
+    
+    last_msg_time = now;
     if ((time >> 7) > 0) {
       melody[index++] = ((time >> 7) & 0x7f) | 0x80;
     }
@@ -382,6 +400,7 @@ class RecordingDownloadManager {
   }
   
   bool is_recording() { return recording; }
+  bool is_online_recording() { return is_recording() && online; }
   char* get_melody() { return melody; }
   
   private:
@@ -394,10 +413,11 @@ class RecordingDownloadManager {
   unsigned long last_msg_time;
   int last_seqnum;
   RecordingCode success_code;
+  bool online;
 };
 
 
-enum CommandType { CC_NONE, CC_CHANNEL, CC_NEXT, CC_TOGGLE_PAUSE, CC_TOGGLE_CONTINUOUS, CC_RECORDING_START, CC_RECORDING_END, CC_RECORDED_NOTE, CC_PLAY_RECORDING };
+enum CommandType { CC_NONE, CC_CHANNEL, CC_NEXT, CC_TOGGLE_PAUSE, CC_TOGGLE_CONTINUOUS, CC_RECORDING_START, CC_RECORDING_END, CC_RECORDED_NOTE, CC_PLAY_RECORDING, CC_TOGGLE_ONLINE_RECORDING };
 
 #pragma pack(push, 1)
 
@@ -556,7 +576,7 @@ public:
     irrecv.enableIRIn(); // Start the receiver
   }
 
-  void reeval() {
+  void reeval(bool require_rpt) {
     command.basic.ctype = CC_NONE;
 
     unsigned long now = millis();
@@ -598,7 +618,7 @@ public:
 
     if (results.value != 0xFFFFFFFF) {
       ir_value = results.value;
-      return;
+      if (require_rpt) return;
     }
 
     if (ir_value == 0) {
@@ -616,11 +636,14 @@ public:
     case 0xFF5AA5: command.basic.ctype = CC_CHANNEL; command.channel.channel = 6; break;
     case 0xFF42BD: command.basic.ctype = CC_CHANNEL; command.channel.channel = 7; break;
     case 0xFF4AB5: command.basic.ctype = CC_CHANNEL; command.channel.channel = 8; break;
-    case 0xFF52AD: command.basic.ctype = CC_CHANNEL; command.channel.channel = 9; break;
+    // channel 9 button is used for playing recording
+    //case 0xFF52AD: command.basic.ctype = CC_CHANNEL; command.channel.channel = 9; break; 
     case 0xFF02FD: command.basic.ctype = CC_NEXT; command.next.dir = -1; break;
     case 0xFFC23D: command.basic.ctype = CC_NEXT; command.next.dir = 1; break;
     case 0xFF22DD: command.basic.ctype = CC_TOGGLE_PAUSE; break;
     case 0xFF9867: command.basic.ctype = CC_TOGGLE_CONTINUOUS; break;
+    case 0xFF629D: command.basic.ctype = CC_TOGGLE_ONLINE_RECORDING; break;
+    case 0xFF52AD: command.basic.ctype = CC_PLAY_RECORDING; break;
     }
 
     sp << "## "; Serial.println(ir_value, HEX);
@@ -687,9 +710,23 @@ void apply_control(const union ControlCommand& command) {
 
   switch (command.basic.ctype) {
   case CC_CHANNEL:
-    if (command.channel.channel >= 0 and command.channel.channel < NUM_MELODIES) {
-      index = command.channel.channel ;
-      next_melody(0);    
+    if (recording_manager.is_online_recording()) {
+      if (command.channel.channel >= 1 && command.channel.channel <= 8) {
+        char note = ALL_NOTES[command.channel.channel - 1];
+        recording_manager.append_note(note, 0, 0);
+        error_melody[0] = 0x80;;
+        error_melody[1] = note;
+        error_melody[2] = 0; 
+        xyl.set_melody(error_melody);
+        xyl.wait_abs(-100);
+        pause = false; continuous = false;
+      }
+    } else {
+      if (command.channel.channel >= 0 and command.channel.channel < NUM_MELODIES) {
+        index = command.channel.channel ;
+        next_melody(0);    
+      }
+
     }
     break;
   case CC_TOGGLE_CONTINUOUS:
@@ -729,16 +766,20 @@ void apply_control(const union ControlCommand& command) {
         break;
     case CC_RECORDING_END: 
         recording_manager.end_recording();
-        break;
-
+        break;    
     case CC_PLAY_RECORDING: 
         xyl.set_melody(recording_manager.get_melody());
         pause = false;        
         break;
+    case CC_TOGGLE_ONLINE_RECORDING:
+        recording_manager.toggle_online_recording();
+        pause = true;
+        break;
     
   };
   if (recording_manager.is_recording()) {
-    pause = true;
+    continuous = false;
+    if (!recording_manager.is_online_recording()) { pause = true; }
   }
   
 }
@@ -793,7 +834,7 @@ void loop()
     return;
   }
 
-  ircontrol.reeval();
+  ircontrol.reeval(!recording_manager.is_online_recording());
   if (ircontrol.get_command().basic.ctype != CC_NONE) {
     apply_control(ircontrol.get_command());
   }
