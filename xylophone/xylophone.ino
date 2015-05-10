@@ -15,7 +15,7 @@ struct SerialPrinter {
 SerialPrinter sp;
 const char endl = '\n';
 
-template <typename T>
+template <typename T>  
 SerialPrinter& operator<<(SerialPrinter& sp, T value) {
   Serial.print(value);
 }
@@ -28,8 +28,8 @@ const int JY_PIN = A4;
 const int IR_PIN = 3;
 const int NOTE_SERVO_PIN = 9;
 const int HIT_SERVO_PIN = 10;
-const int BASE_HIT = 44;
-const int HIT_ANGLE = 5;
+const int BASE_HIT = 45;
+const int HIT_ANGLE = 6;
 const int LED_PIN =4;
 //////////////////
 class MelodyTrack {
@@ -95,6 +95,7 @@ public:
      note_servo.attach(note_pin);
      hit_servo.attach(hit_pin);
      hit_servo.write(base_hit);
+     angle_offset = 0;
   }
   
   void reset() {
@@ -250,13 +251,13 @@ public:
   int get_note_offset(char note) {
     switch (note) {
       case 'C': return 88;
-      case 'D': return 78;
-      case 'E': return 71;
+      case 'D': return 80;
+      case 'E': return 72;
       case 'F': return 63;
       case 'G': return 55;
       case 'A': return 48;
-      case 'B': return 41;    
-      case 'c': return 34 ;    
+      case 'B': return 39;    
+      case 'c': return 32 ;    
     
     }
     return -1;
@@ -265,7 +266,12 @@ public:
   int get_note_angle(char note) {
     int offset = get_note_offset(note);
     if (offset < 0) return -1;
-    return offset -7;
+    return offset + angle_offset;
+  }
+  
+  void set_offset(int offset) {
+    note_servo.write(note_servo.read() + offset - angle_offset);
+    angle_offset = offset;
   }
   
   Servo note_servo;
@@ -277,7 +283,7 @@ public:
   XYLState state;
   unsigned long state_active_time;
   int hit_count;
-
+  int angle_offset;
 };
 
 char MELODY_MUPPETS[] = {0x80, 0x63, 0x9f, 0x63, 0x41, 0x42, 0x41, 0x8f, 0x42, 0x9f, 0x47, 0xbe, 0x63, 0x9f, 0x63, 0x41, 0x42, 0x8f, 0x41, 0x9f, 0x47, 0xbe, 0x45, 0x9f, 0x45, 0x47, 0x46, 0x45, 0x8f, 0x46, 0x9f, 0x63, 0x8f, 0x43, 0x44, 0x45, 0x9f, 0x45, 0x8f, 0x45, 0x9f, 0x45, 0x8f, 0x47, 0xdd, 0x63, 0x9f, 0x63, 0x41, 0x42, 0x41, 0x8f, 0x42, 0x9f, 0x47, 0xbe, 0x63, 0x9f, 0x63, 0x41, 0x42, 0x8f, 0x41, 0x9f, 0x47, 0xbe, 0x45, 0x9f, 0x45, 0x47, 0x46, 0x45, 0x8f, 0x46, 0x9f, 0x63, 0x8f, 0x43, 0x44, 0x45, 0x9f, 0x45, 0x8f, 0x44, 0x9f, 0x44, 0x8f, 0x43, 0x0};
@@ -666,10 +672,53 @@ private:
 };
 
 
+class PotentiometerReader {
+  public:
+  static const long INVALID = 0xFFF;
+  
+  PotentiometerReader(int a_pin, int a_ratio, int a_offset, int a_time_threshold, int a_sample_period) :
+  pin(a_pin), ratio(a_ratio), offset(a_offset), time_threshold(a_time_threshold), sample_period(a_sample_period), last_value(INVALID), last_sample_time(0), value_time(0) {}
+  
+  int read() {
+    long now = millis();
+    if (last_sample_time + sample_period > now) {
+      return INVALID;
+    }
+    last_sample_time = now;
+    int value = analogRead(pin) / ratio + offset;
+    
+    if (value == last_value) {
+      if (now - value_time > time_threshold && !reported) {
+        reported = true;
+        return value;
+        
+      }
+      return INVALID;      
+    }
+    last_value = value;
+    reported = false;
+    value_time = now;
+    return INVALID;
+  }
+
+  private:
+  
+  int pin;
+  int ratio;
+  int offset;
+  int time_threshold;
+  int sample_period;
+  int last_value;  
+  long last_sample_time;
+  long value_time;
+  bool reported;
+};
+
+
 XYLPlayer xyl;
 JControl jcontrol;
 IRControl ircontrol(IR_PIN);
-
+PotentiometerReader ptreader(A2, -32, 16, 200, 20);
 
 
 
@@ -782,7 +831,7 @@ void apply_control(const union ControlCommand& command) {
     if (!recording_manager.is_online_recording()) { pause = true; }
   }
   
-}
+};
 
 void check_recording() {
    RecordingCode rc = recording_manager.check_recording();
@@ -808,6 +857,9 @@ void check_recording() {
    xyl.set_melody(error_melody);
    pause = false;
 }
+
+long last_pt_sample = 0;
+
 void loop() 
 { 
   //xyl.goto_angle(90);
@@ -846,5 +898,14 @@ void loop()
     cached_continuous = continuous;
     digitalWrite(LED_PIN, continuous ? HIGH : LOW);
   }
-  
+ 
+ int pt_value = ptreader.read();
+ if (pt_value != PotentiometerReader::INVALID) {
+    sp << "Adjusting offset " << pt_value << endl; 
+    xyl.set_offset(pt_value);
+ }
+ //if(last_pt_sample + 1000 < millis()) {
+ //  sp << "pt " << analogRead(A2) << endl; 
+ //  last_pt_sample = millis();
+ //}
 }
