@@ -129,32 +129,6 @@ public:
     goto_angle(get_note_angle('F'));
   }
   
-  void play_melody() {
-    
-    goto_angle(get_note_angle('F'));
-
-    if (!mtrack.has_melody()) {
-      sp << "No melody" << endl;
-      return;      
-    }
-    
-    while (true) {
-      mtrack.next();
-      char note = mtrack.get_note();
-      unsigned long  play_time = last_hit_time + mtrack.get_note_time();
-      
-      if (note == 0) {
-        break;
-      }
-      playNote(note, play_time);
-      //sp << "index=" << mtrack.index << endl;
-    }
-    sp << "Done" << endl;
-    
-    goto_angle(90);          
-  }
-  
-  
   void reeval_play_melody() {
     
     unsigned long entry = millis();
@@ -208,32 +182,7 @@ public:
     state = new_state;
     state_active_time = time;
   }
-  
-  void hit() {
-    Serial.print(millis()); Serial.println(": Hit");
-    last_hit_time = millis();
-    hit_servo.write(base_hit + 5); //21);
-    delay(100);
-    delay(100);
-    hit_servo.write(base_hit);
-  
-  
-  };
-  
-  void playNote(char note, unsigned long time) {
-    int angle = get_note_angle(note);
-    if (angle < 0) { return; }
-    Serial.print(time); Serial.print(": Play "); Serial.print(note); Serial.print(" at "); Serial.print(angle); Serial.print("\n");
-    note_servo.write(angle);
-    //delay(50);
-    unsigned long now = millis();
-    if (now < time) {
-      delay(time - now);
-    }
-    hit();
-    delay(50);  
-  }
-
+    
   void goto_angle(int target_angle) {
     int cur_angle = note_servo.read();
     int dir = (target_angle > cur_angle) ? 1 : -1;
@@ -746,14 +695,11 @@ void setup()
   Serial.begin(9600);
   pinMode(LED_PIN, OUTPUT);
   xyl.init(NOTE_SERVO_PIN, HIT_SERVO_PIN);
+  //xyl.center();
   ircontrol.init();
   next_melody(0);
   pause = true;
-  continuous = true;
-
-  //xyl.set_melody(melody);
-  //xyl.center();
-  
+  continuous = true;  
 } 
 
 RecordingDownloadManager recording_manager;
@@ -866,10 +812,6 @@ long last_pt_sample = 0;
 
 void loop() 
 { 
-  //xyl.goto_angle(90);
-  //xyl.goto_angle(60);
-  
-  //return;
   if (xyl.is_done()) {
     next_melody(1);
     xyl.wait(2000);
@@ -877,7 +819,7 @@ void loop()
     return;
     
   }
-  //xyl.set_melody(melody);
+
   if (!pause) {  
     xyl.reeval_play_melody();
   }
@@ -908,8 +850,5 @@ void loop()
     sp << "Adjusting offset " << pt_value << endl; 
     xyl.set_offset(pt_value);
  }
- //if(last_pt_sample + 1000 < millis()) {
- //  sp << "pt " << analogRead(A2) << endl; 
- //  last_pt_sample = millis();
- //}
+
 }
